@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Cancel in-progress runs for the same branch/PR when new commits are pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test & Analyze (Ubuntu)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: puro
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Dart SDK
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Resolve Dependencies
+        run: dart pub get
+
+      - name: Verify Code Formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Static Analysis
+        run: dart analyze --fatal-infos
+
+      - name: Run Tests
+        run: dart test
+
+      - name: Verify AOT Binary Compilation
+        run: |
+          dart compile exe bin/puro.dart -o /tmp/puro_test_bin
+          rm -f /tmp/puro_test_bin

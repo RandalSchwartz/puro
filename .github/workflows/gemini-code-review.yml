@@ -1,0 +1,178 @@
+name: Gemini Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Optional PR number to review (leave blank for dry-run against HEAD~1..HEAD)'
+        required: false
+        type: string
+
+jobs:
+  review:
+    name: Gemini Code Assist (GCA)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract PR Diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_PR: ${{ inputs.pr_number }}
+        run: |
+          if [ -n "$INPUT_PR" ]; then
+            gh pr diff "$INPUT_PR" --repo "${{ github.repository }}" > pr_diff.txt
+          elif [ -n "${{ github.base_ref }}" ]; then
+            git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          else
+            git diff HEAD~1..HEAD > pr_diff.txt
+          fi
+
+      - name: Execute Gemini Code Review
+        uses: actions/github-script@v7
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          INPUT_PR: ${{ inputs.pr_number }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const apiKey = process.env.GEMINI_API_KEY;
+
+            if (!apiKey) {
+              console.log('⚠️ No GEMINI_API_KEY secret configured in repository settings. Skipping automated code review.');
+              return;
+            }
+
+            const inputPr = process.env.INPUT_PR ? parseInt(process.env.INPUT_PR, 10) : null;
+            const issueNumber = inputPr || context.issue.number || context.payload.pull_request?.number;
+            const isWorkflowDispatch = context.eventName === 'workflow_dispatch';
+            if (!issueNumber && !isWorkflowDispatch) {
+              console.log('No pull request issue number found. Skipping review.');
+              return;
+            }
+
+            let diff = '';
+            try {
+              diff = fs.readFileSync('pr_diff.txt', 'utf8');
+            } catch (err) {
+              console.log('No diff file found:', err.message);
+              return;
+            }
+
+            if (!diff.trim()) {
+              console.log('No diff changes found. Skipping review.');
+              return;
+            }
+
+            const maxDiffLength = 50000;
+            const truncatedDiff = diff.length > maxDiffLength 
+              ? diff.substring(0, maxDiffLength) + '\n... (diff truncated)' 
+              : diff;
+
+            let prTitle = context.payload.pull_request?.title || 'PR Review';
+            let prBody = context.payload.pull_request?.body || 'No description provided.';
+            if (inputPr && !context.payload.pull_request) {
+              try {
+                const { data: prData } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: inputPr
+                });
+                prTitle = prData.title || prTitle;
+                prBody = prData.body || prBody;
+              } catch (e) {
+                console.log('Notice: Could not fetch PR #' + inputPr + ' metadata:', e.message);
+              }
+            }
+
+            // 1. Ingest AGENTS.md (core developer handbook & repo constitution)
+            let agentsContext = '';
+            if (fs.existsSync('AGENTS.md')) {
+              try {
+                agentsContext = fs.readFileSync('AGENTS.md', 'utf8');
+                console.log('Loaded AGENTS.md (' + agentsContext.length + ' chars)');
+              } catch (e) {
+                console.log('Notice: Failed reading AGENTS.md:', e.message);
+              }
+            }
+
+            const prompt = "You are Gemini Code Assist (GCA), an expert automated code reviewer for the Puro Flutter & Dart environment manager repository.\n\n" +
+              (agentsContext ? "=== REPOSITORY CONSTITUTION & DEVELOPER HANDBOOK (AGENTS.md) ===\n" + agentsContext + "\n\n" : "") +
+              "=== PULL REQUEST DETAILS ===\n" +
+              "- PR Title: " + prTitle + "\n" +
+              "- PR Description: " + prBody + "\n\n" +
+              "Diff:\n" +
+              "```diff\n" +
+              truncatedDiff + "\n" +
+              "```\n\n" +
+              "=== REVIEW INSTRUCTIONS ===\n" +
+              "Provide a professional, concise code review evaluated against Puro standards and best practices:\n" +
+              "1. 🔍 Architectural & Code Analysis:\n" +
+              "   - Environment & Cache Safety: Verify Git alternates (`objects/info/alternates`) handling, engine artifact caching, and symlink management across platforms.\n" +
+              "   - Non-Destructive IDE Integration: Ensure edits to IDE configurations (VS Code settings, IntelliJ libraries) preserve user formatting and comments without clobbering existing configuration.\n" +
+              "   - Robust Process & Platform Interop: Avoid brittle shell-out parsing, unsafe regex splitting, or unhandled platform-specific exceptions (especially Windows UAC, path quoting, and registry operations).\n" +
+              "   - Concurrency & Locking: Check file lock safety and atomic state transitions.\n" +
+              "2. 🧪 Test Coverage & Code Quality:\n" +
+              "   - Verify tests are added or updated for new features, bug fixes, or changed behavior.\n" +
+              "   - Verify Dart static analysis passes with zero warnings or errors.\n" +
+              "   - Ensure all new public declarations have clear documentation comments (///).\n" +
+              "3. 🎯 GCA Recommendation:\n" +
+              "   - Explicit recommendation tag: 🟢 APPROVE or 🟡 REQUEST CHANGES.\n\n" +
+              "Format your response in clean GitHub Markdown with headings, bullet points, and an explicit GCA approval status tag.";
+
+            const model = 'gemini-flash-latest';
+            const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey;
+            console.log('Querying Gemini API (' + model + ')...');
+
+            let reviewText = null;
+            try {
+              const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: prompt }] }]
+                })
+              });
+
+              if (!res.ok) {
+                const errBody = await res.text();
+                console.log('⚠️ Gemini API Review Notice (HTTP ' + res.status + '):\n' + errBody);
+                console.log('Please verify GEMINI_API_KEY permissions in Google AI Studio / GCP Console.');
+                return;
+              }
+
+              const data = await res.json();
+              reviewText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            } catch (e) {
+              console.log('⚠️ Fetch error for model ' + model + ':', e.message);
+              return;
+            }
+
+            if (!reviewText) {
+              console.log('⚠️ Gemini API returned an empty review response.');
+              return;
+            }
+
+            if (!issueNumber) {
+              console.log('✅ Gemini Code Assist (GCA) Dry-Run Review Output:\n\n' + reviewText);
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: '🤖 **Gemini Code Assist (GCA) Automated Review**\n\n' + reviewText
+            });
+            console.log('✅ Successfully posted automated code review to PR #' + issueNumber);

@@ -314,11 +314,9 @@ void main() {
   });
 
   test('Remove middle from map with comments', () {
-    testRemove(
-      '{"a": "b" /*a*/ , /*b*/ "c": "d" /*c*/ , /*d*/ "e": "f"}',
-      ['c'],
-      '{"a": "b" /*a*/ , /*d*/ "e": "f"}',
-    );
+    testRemove('{"a": "b" /*a*/ , /*b*/ "c": "d" /*c*/ , /*d*/ "e": "f"}', [
+      'c',
+    ], '{"a": "b" /*a*/ , /*d*/ "e": "f"}');
   });
 
   test('Remove middle from list with comments', () {
