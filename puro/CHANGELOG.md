@@ -1,3 +1,7 @@
+## Unreleased
+
+* Fix `puro dart pub` failing to detect Flutter SDK on modern versions (#2)
+
 ## 1.5.0
 
 * Fixed several major bugs

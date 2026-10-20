@@ -115,6 +115,7 @@ Future<int> runDartCommand({
   log.v(
     'Setting up dart took ${clock.now().difference(start).inMilliseconds}ms',
   );
+  await ensureFlutterVersionJson(scope: scope, environment: environment);
   final nonOptionArgs = args.where((e) => !e.startsWith('-')).toList();
   if (nonOptionArgs.length >= 2 &&
       nonOptionArgs[0] == 'pub' &&
