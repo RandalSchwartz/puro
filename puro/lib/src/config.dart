@@ -33,6 +33,8 @@ Directory? findProjectDir(Directory directory, String fileName) {
   return null;
 }
 
+final defaultPuroBuildsUrl = Uri.parse('https://puro.dev/builds');
+
 class PuroConfig {
   PuroConfig({
     required this.fileSystem,
@@ -215,7 +217,7 @@ class PuroConfig {
       environmentOverride: environmentOverride,
       puroBuildsUrl: Uri.parse(
         (globalPrefs.hasPuroBuildsUrl() ? globalPrefs.puroBuildsUrl : null) ??
-            'https://puro.dev/builds',
+            defaultPuroBuildsUrl.toString(),
       ),
       buildTarget: globalPrefs.hasPuroBuildTarget()
           ? PuroBuildTarget.fromString(globalPrefs.puroBuildTarget)
@@ -330,6 +332,7 @@ class PuroConfig {
   late final File defaultEnvNameFile = puroRoot.childFile('default_env');
   late final Link defaultEnvLink = envsDir.childLink('default');
   late final Uri puroLatestVersionUrl = puroBuildsUrl.append(path: 'latest');
+  bool get isDefaultBuildsUrl => puroBuildsUrl == defaultPuroBuildsUrl;
   late final File puroLatestVersionFile = puroRoot.childFile('latest_version');
   late final Directory depotToolsDir = puroRoot.childDirectory('depot_tools');
 

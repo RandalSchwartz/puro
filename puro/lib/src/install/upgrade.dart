@@ -8,6 +8,7 @@ import '../logger.dart';
 import '../process.dart';
 import '../provider.dart';
 import '../terminal.dart';
+import '../version.dart';
 
 Future<int> upgradePuro({
   required Scope scope,
@@ -17,6 +18,11 @@ Future<int> upgradePuro({
   final config = PuroConfig.of(scope);
   final terminal = Terminal.of(scope);
   final log = PuroLogger.of(scope);
+  final puroVersion = await PuroVersion.of(scope);
+  if (puroVersion.isFork && config.isDefaultBuildsUrl) {
+    log.e('Cannot upgrade fork binary from upstream puro.dev');
+    return 1;
+  }
   final buildTarget = config.buildTarget;
   final tempFile = config.puroExecutableTempFile;
 

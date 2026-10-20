@@ -1,7 +1,7 @@
 name: puro
 description: A powerful tool for installing and upgrading Flutter versions
 version: 1.5.0
-repository: https://github.com/pingbird/puro
+repository: https://github.com/RandalSchwartz/puro
 homepage: https://puro.dev
 
 environment:
