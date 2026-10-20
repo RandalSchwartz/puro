@@ -12,6 +12,7 @@ import '../logger.dart';
 import '../process.dart';
 import '../progress.dart';
 import '../provider.dart';
+import 'command.dart';
 import 'create.dart';
 import 'engine.dart';
 
@@ -304,16 +305,67 @@ Future<FlutterToolInfo> setUpFlutterTool({
 }
 
 // https://github.com/pingbird/puro/issues/20
-// Some tools will break if `version` does not exist and flutter won't re-create
-// it if `flutter.version.json` exists in the cache. Not ideal but we just
-// delete it.
+/// Some tools will break if `version` does not exist and flutter won't re-create
+/// it if `flutter.version.json` exists in the cache. Writes the legacy version
+/// file based on `frameworkVersion` from `flutter.version.json`.
 Future<void> fixLegacyVersionFile({
   required Scope scope,
   required EnvConfig environment,
 }) async {
-  if (!environment.flutter.legacyVersionFile.existsSync()) {
-    if (environment.flutter.cache.versionJsonFile.existsSync()) {
-      environment.flutter.cache.versionJsonFile.deleteSync();
+  final log = PuroLogger.of(scope);
+  final legacyVersionFile = environment.flutter.legacyVersionFile;
+  final versionJsonFile = environment.flutter.cache.versionJsonFile;
+  if (!versionJsonFile.existsSync()) return;
+  String? frameworkVersion;
+  try {
+    final versionJson = jsonDecode(versionJsonFile.readAsStringSync());
+    if (versionJson is Map) {
+      final version = versionJson['frameworkVersion'];
+      if (version is String && version.isNotEmpty) {
+        frameworkVersion = version;
+      }
     }
+  } catch (exception) {
+    log.d('Failed to parse `${versionJsonFile.path}`: $exception');
   }
+  if (frameworkVersion == null) {
+    log.d(
+      'Deleting `${versionJsonFile.path}` because it has no framework version',
+    );
+    versionJsonFile.deleteSync();
+    return;
+  }
+  final contents = '$frameworkVersion\n';
+  if (legacyVersionFile.existsSync() &&
+      legacyVersionFile.readAsStringSync().trim() == frameworkVersion) {
+    return;
+  }
+  log.d('Writing legacy version file `${legacyVersionFile.path}`');
+  legacyVersionFile.writeAsStringSync(contents);
+}
+
+/// Runs the Flutter tool once to generate `flutter.version.json` if missing.
+///
+/// This only happens after creating or upgrading an environment, or when
+/// executing `puro dart` in an environment where `flutter.version.json`
+/// has not yet been generated.
+Future<void> ensureFlutterVersionJson({
+  required Scope scope,
+  required EnvConfig environment,
+}) async {
+  if (environment.flutter.cache.versionJsonFile.existsSync()) return;
+  final log = PuroLogger.of(scope);
+  log.v(
+    '`flutter.version.json` is missing, generating it with the flutter tool',
+  );
+  await runOptional(scope, 'Generating flutter.version.json', () async {
+    await runFlutterCommand(
+      scope: scope,
+      environment: environment,
+      args: ['--version', '--machine'],
+      onStdout: (_) {},
+      onStderr: (_) {},
+    );
+  });
+  await fixLegacyVersionFile(scope: scope, environment: environment);
 }
