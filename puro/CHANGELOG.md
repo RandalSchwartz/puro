@@ -1,5 +1,6 @@
 ## Unreleased
 
+* Disable or redirect `puro upgrade` and update checks to protect fork installation (#1)
 * Fix `puro dart pub` failing to detect Flutter SDK on modern versions (#2)
 
 ## 1.5.0

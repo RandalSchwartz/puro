@@ -51,6 +51,14 @@ class PuroUpgradeCommand extends PuroCommand {
     var targetVersionString = unwrapSingleOptionalArgument();
 
     if (puroVersion.type == PuroInstallationType.pub) {
+      if (puroVersion.isFork) {
+        return BasicMessageResult(
+          'Automatic pub upgrade is disabled to protect fork installation.\n'
+          'To update from the fork repository, run:\n'
+          '  dart pub global activate --source git $forkRepository.git',
+          success: false,
+        );
+      }
       final result = await runProcess(scope, Platform.resolvedExecutable, [
         'pub',
         'global',
@@ -77,6 +85,23 @@ class PuroUpgradeCommand extends PuroCommand {
         "Can't upgrade: ${puroVersion.type.description}",
         success: false,
       );
+    }
+
+    if (puroVersion.isFork) {
+      if (!force) {
+        return BasicMessageResult(
+          'Automatic binary upgrades are disabled to protect fork installation.\n'
+          'To upgrade a fork installation, build from source or configure a custom builds URL.',
+          success: false,
+        );
+      }
+      if (config.isDefaultBuildsUrl) {
+        return BasicMessageResult(
+          'No custom builds URL configured for fork binary upgrade.\n'
+          'Upgrading from puro.dev would overwrite this fork with upstream Puro.',
+          success: false,
+        );
+      }
     }
 
     if (targetVersionString == 'master') {

@@ -22,6 +22,9 @@ import 'provider.dart';
 import 'terminal.dart';
 
 const _puroVersionDefine = String.fromEnvironment('puro_version');
+const defaultIsFork = bool.fromEnvironment('puro_is_fork', defaultValue: true);
+const forkRepository = 'https://github.com/RandalSchwartz/puro';
+const forkRepositoryName = 'RandalSchwartz/puro';
 
 enum PuroInstallationType {
   distribution('Puro is installed normally'),
@@ -42,6 +45,7 @@ class PuroVersion {
     required this.target,
     required this.packageRoot,
     required this.puroExecutable,
+    this.isFork = defaultIsFork,
   });
 
   final Version semver;
@@ -49,6 +53,7 @@ class PuroVersion {
   final PuroBuildTarget target;
   final Directory? packageRoot;
   final File? puroExecutable;
+  final bool isFork;
 
   bool get isUnknown => semver == unknownSemver;
 
@@ -229,6 +234,20 @@ class PuroVersion {
       }
     }
 
+    if (defaultIsFork &&
+        version != unknownSemver &&
+        !version.preRelease.contains('fork')) {
+      version = Version(
+        version.major,
+        version.minor,
+        version.patch,
+        pre: version.preRelease.isNotEmpty
+            ? '${version.preRelease.join('.')}-fork'
+            : 'fork',
+        build: version.build.isNotEmpty ? version.build.join('.') : null,
+      );
+    }
+
     log.d('version: $version');
 
     return PuroVersion(
@@ -237,6 +256,7 @@ class PuroVersion {
       target: target,
       packageRoot: packageRoot,
       puroExecutable: puroExecutable,
+      isFork: defaultIsFork,
     );
   });
 
@@ -331,6 +351,13 @@ Future<CommandMessage?> checkIfUpdateAvailable({
     return null;
   }
   final puroVersion = await PuroVersion.of(scope);
+  if (puroVersion.isFork &&
+      (!prefs.hasEnableUpdateCheck() || !prefs.enableUpdateCheck)) {
+    log.v(
+      'Fork build with update check not explicitly enabled, skipping update check',
+    );
+    return null;
+  }
   if (puroVersion.type != PuroInstallationType.distribution) {
     log.v('Not a distribution, skipping update check');
     return null;

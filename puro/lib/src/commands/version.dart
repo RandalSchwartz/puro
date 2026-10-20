@@ -49,6 +49,7 @@ class VersionCommand extends PuroCommand {
       CommandMessage(
         'Puro ${puroVersion.semver} '
         '(${puroVersion.type.name}/${puroVersion.target.name})\n'
+        '${puroVersion.isFork ? 'fork: $forkRepositoryName\n' : ''}'
         'Dart ${Platform.version}',
         type: CompletionType.info,
       ),
