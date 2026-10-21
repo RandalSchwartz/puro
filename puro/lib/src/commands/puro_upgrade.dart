@@ -79,6 +79,21 @@ class PuroUpgradeCommand extends PuroCommand {
           success: false,
         );
       }
+    } else if (puroVersion.type == PuroInstallationType.appBundle) {
+      if (puroVersion.isFork) {
+        return BasicMessageResult(
+          'Automatic app-bundle upgrade is disabled to protect fork installation.\n'
+          'To update from the fork repository, run:\n'
+          '  dart install --force $forkRepository.git',
+          success: false,
+        );
+      }
+      return BasicMessageResult(
+        'Automatic app-bundle upgrade is not supported via this command.\n'
+        'To update puro, run:\n'
+        '  dart install --force puro',
+        success: false,
+      );
     } else if (puroVersion.type != PuroInstallationType.distribution &&
         !force) {
       return BasicMessageResult(

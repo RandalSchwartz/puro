@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 2.0.0
+
+* Support `dart install` app-bundle installation type and automatic version/commit resolution (#13)
+* Abort automatic binary upgrade on `dart install` app-bundle installations to prevent bundle corruption (#13)
 * Disable or redirect `puro upgrade` and update checks to protect fork installation (#1)
 * Fix `puro dart pub` failing to detect Flutter SDK on modern versions (#2)
 

@@ -31,6 +31,7 @@ enum PuroInstallationType {
   standalone('Puro is a standalone executable'),
   development('Puro is a development version'),
   pub('Puro was installed with pub'),
+  appBundle('Puro was installed with dart install'),
   unknown('Could not determine installation method');
 
   const PuroInstallationType(this.description);
@@ -56,6 +57,14 @@ class PuroVersion {
   final bool isFork;
 
   bool get isUnknown => semver == unknownSemver;
+
+  static final executablePathOverrideProvider = Provider<String?>(
+    (scope) => null,
+  );
+  static final isForkOverrideProvider = Provider<bool?>((scope) => null);
+  static final puroVersionDefineOverrideProvider = Provider<String?>(
+    (scope) => null,
+  );
 
   static const _fs = LocalFileSystem();
 
@@ -116,9 +125,13 @@ class PuroVersion {
     log.d('Platform.script: ${Platform.script}');
     log.d('Platform.packageConfig: ${Platform.packageConfig}');
 
-    final executablePath = path.canonicalize(Platform.resolvedExecutable);
-    var scriptPath = Platform.script.toFilePath();
-    if (path.equals(
+    final executableOverride = scope.read(executablePathOverrideProvider);
+    final executablePath = path.canonicalize(
+      executableOverride ?? Platform.resolvedExecutable,
+    );
+    var scriptPath = executableOverride ?? Platform.script.toFilePath();
+    if (executableOverride != null ||
+        path.equals(
           scriptPath,
           path.join(path.current, target.executableName),
         ) ||
@@ -180,7 +193,20 @@ class PuroVersion {
 
     var installationType = PuroInstallationType.unknown;
     File? puroExecutable;
-    if (scriptFile.basename == 'puro.dart' &&
+    final exeFile = config.fileSystem.file(executablePath);
+    final isAppBundle =
+        exeFile.parent.basename == 'bin' &&
+        exeFile.parent.parent.basename == 'bundle' &&
+        (executablePath.contains('app-bundles') ||
+            exeFile.parent.parent.parent
+                .childFile('pubspec.yaml')
+                .existsSync());
+
+    if (isAppBundle) {
+      installationType = PuroInstallationType.appBundle;
+      packageRoot = exeFile.parent.parent.parent;
+      puroExecutable = exeFile;
+    } else if (scriptFile.basename == 'puro.dart' &&
         scriptFile.parent.basename == 'bin' &&
         scriptFile.parent.parent.parent.childDirectory('.git').existsSync()) {
       installationType = PuroInstallationType.development;
@@ -204,12 +230,16 @@ class PuroVersion {
 
     log.d('installationType: $installationType');
 
+    final isFork = scope.read(isForkOverrideProvider) ?? defaultIsFork;
+    final puroVersionDefine =
+        scope.read(puroVersionDefineOverrideProvider) ?? _puroVersionDefine;
+
     /// Attempts to find the version of puro using either the `puro_version`
     /// define or the git tag. This is a tiny bit slower in development because
     /// it has to call git a few times.
     var version = unknownSemver;
-    if (_puroVersionDefine.isNotEmpty) {
-      version = Version.parse(_puroVersionDefine);
+    if (puroVersionDefine.isNotEmpty) {
+      version = Version.parse(puroVersionDefine);
     } else if (packageRoot != null) {
       if (installationType == PuroInstallationType.development) {
         final gitTagVersion = await GitTagVersion.query(
@@ -231,10 +261,75 @@ class PuroVersion {
             'Error while parsing ${pubspecLockFile.path}\n$exception\n$stackTrace',
           );
         }
+      } else if (installationType == PuroInstallationType.appBundle) {
+        final pubspecLockFile = packageRoot.childFile('pubspec.lock');
+        final pubspecYamlFile = packageRoot.childFile('pubspec.yaml');
+        String? commit;
+
+        if (pubspecLockFile.existsSync()) {
+          try {
+            final pubspecLock =
+                loadYaml(pubspecLockFile.readAsStringSync()) as YamlMap;
+            final packages = pubspecLock['packages'];
+            if (packages is YamlMap) {
+              final puroPkg = packages['puro'];
+              if (puroPkg is YamlMap) {
+                if (puroPkg['version'] is String) {
+                  version = Version.parse(puroPkg['version'] as String);
+                }
+                final description = puroPkg['description'];
+                if (description is YamlMap &&
+                    description['resolved-ref'] is String) {
+                  commit = description['resolved-ref'] as String;
+                }
+              }
+            }
+          } catch (exception, stackTrace) {
+            log.w(
+              'Error while parsing ${pubspecLockFile.path}\n$exception\n$stackTrace',
+            );
+          }
+        }
+
+        if (version == unknownSemver && pubspecYamlFile.existsSync()) {
+          try {
+            final pubspecYaml =
+                loadYaml(pubspecYamlFile.readAsStringSync()) as YamlMap;
+            if (pubspecYaml['version'] is String) {
+              version = Version.parse(pubspecYaml['version'] as String);
+            }
+          } catch (exception, stackTrace) {
+            log.w(
+              'Error while parsing ${pubspecYamlFile.path}\n$exception\n$stackTrace',
+            );
+          }
+        }
+
+        if (commit == null && packageRoot.parent.basename == 'git') {
+          final dirName = packageRoot.basename;
+          if (RegExp(r'^[0-9a-fA-F]{7,}$').hasMatch(dirName)) {
+            commit = dirName;
+          }
+        }
+
+        if (commit != null && version != unknownSemver) {
+          final shortCommit = commit.length > 7
+              ? commit.substring(0, 7)
+              : commit;
+          version = Version(
+            version.major,
+            version.minor,
+            version.patch,
+            pre: version.preRelease.isNotEmpty
+                ? version.preRelease.join('.')
+                : null,
+            build: shortCommit,
+          );
+        }
       }
     }
 
-    if (defaultIsFork &&
+    if (isFork &&
         version != unknownSemver &&
         !version.preRelease.contains('fork')) {
       version = Version(
@@ -256,7 +351,7 @@ class PuroVersion {
       target: target,
       packageRoot: packageRoot,
       puroExecutable: puroExecutable,
-      isFork: defaultIsFork,
+      isFork: isFork,
     );
   });
 
